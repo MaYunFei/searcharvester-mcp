@@ -14,6 +14,39 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 
+// ---- Pure formatting functions (exported for testing) ----
+
+export function formatSearchResults(data, query) {
+  if (!data.results || data.results.length === 0) {
+    return `未检索到有关 "${query}" 的任何搜索结果。`;
+  }
+
+  return data.results
+    .map((r, i) => {
+      const scoreStr = r.score != null ? `[Score: ${r.score.toFixed(2)}]` : "";
+      return `${i + 1}. **${r.title || "无标题"}**\n   URL: ${r.url}\n   内容: ${r.content || "暂无摘录"}\n   ${scoreStr}`;
+    })
+    .join("\n\n");
+}
+
+export function formatExtractResult(data) {
+  const result = data.results?.[0] || {};
+
+  let fullContent = result.content || "";
+
+  if (result.pages && result.pages.total > 1) {
+    // Multi-page: append stitched placeholder (actual stitching
+    // happens via fetchExtractPage in the handler, not here)
+    fullContent += `\n\n> ⚠ 此文档共 ${result.pages.total} 页，已自动拼接。`;
+  }
+
+  return {
+    url: result.url,
+    title: result.title || "未知",
+    content: fullContent,
+  };
+}
+
 // Retrieve settings from environment (no hardcoded IPs to ensure privacy and shareability)
 const apiKey = process.env.SEARCHARVESTER_API_KEY;
 const internalUrl = process.env.SEARCHARVESTER_INTERNAL_URL; // e.g. http://192.168.1.201:8001
@@ -237,33 +270,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (args.categories) payload.categories = args.categories;
 
       const data = await fetchWithFallback("/search", payload);
-
-      if (!data.results || data.results.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `未检索到有关 "${args.query}" 的任何搜索结果。`,
-            },
-          ],
-        };
-      }
-
-      // Format results into user-readable Markdown output code block
-      const resultText = data.results
-        .map((r, i) => {
-          const scoreStr = r.score ? `[Score: ${r.score.toFixed(2)}]` : "";
-          return `${i + 1}. **${r.title || "无标题"}**\n   URL: ${r.url}\n   内容: ${r.content || "暂无摘录"}\n   ${scoreStr}`;
-        })
-        .join("\n\n");
+      const resultText = formatSearchResults(data, args.query);
 
       return {
-        content: [
-          {
-            type: "text",
-            text: resultText,
-          },
-        ],
+        content: [{ type: "text", text: resultText }],
       };
     }
 
@@ -276,46 +286,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const data = await fetchWithFallback("/extract", payload);
 
       // API returns {results: [{url, title, content, ...}], failed_results: []}
-      const result = data.results?.[0] || {};
+      const formatted = formatExtractResult(data);
 
-      let fullContent = result.content || "";
-
-      if (args.size === "f" && result.pages && result.pages.total > 1) {
+      // Cascade fetch remaining pages when size matches 'f' (full)
+      if (args.size === "f" && data.results?.[0]?.pages?.total > 1) {
+        const r = data.results[0];
         const activeBaseUrl =
-          internalUrl && result.url && result.url.startsWith(internalUrl)
+          internalUrl && r.url && r.url.startsWith(internalUrl)
             ? internalUrl
             : externalUrl;
 
         if (activeBaseUrl) {
-          const total = result.pages.total;
+          const total = r.pages.total;
           for (let p = 2; p <= total; p++) {
-            const pageTxt = await fetchExtractPage(
-              activeBaseUrl,
-              apiKey,
-              result.id,
-              p
-            );
+            const pageTxt = await fetchExtractPage(activeBaseUrl, apiKey, r.id, p);
             if (pageTxt) {
-              fullContent += `\n\n=== 页面分页拼接 (PAGE ${p}/${total}) ===\n\n${pageTxt}`;
+              formatted.content += `\n\n=== 页面分页拼接 (PAGE ${p}/${total}) ===\n\n${pageTxt}`;
             }
           }
         }
       }
 
-      const formattedOutput =
-        `URL: ${result.url}\n` +
-        `标题: ${result.title || "未知"}\n` +
-        `字符总计: ${fullContent.length} |\n\n` +
+      const md =
+        `URL: ${formatted.url}\n` +
+        `标题: ${formatted.title}\n` +
+        `字符总计: ${formatted.content.length} |\n\n` +
         `---\n\n` +
-        `${fullContent}`;
+        `${formatted.content}`;
 
       return {
-        content: [
-          {
-            type: "text",
-            text: formattedOutput,
-          },
-        ],
+        content: [{ type: "text", text: md }],
       };
     }
 
@@ -337,14 +337,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-// Run server using stdio pathway
+// Run server using stdio pathway (only when executed directly, not when imported)
+import { fileURLToPath } from "node:url";
 async function run() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Searcharvester MCP server running on stdio");
 }
 
-run().catch((err) => {
-  console.error("Searcharvester MCP server fatal crash:", err);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  run().catch((err) => {
+    console.error("Searcharvester MCP server fatal crash:", err);
+    process.exit(1);
+  });
+}
