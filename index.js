@@ -339,13 +339,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Run server using stdio pathway (only when executed directly, not when imported)
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
+
 async function run() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Searcharvester MCP server running on stdio");
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const thisFile = fileURLToPath(import.meta.url);
+if (process.argv[1] && realpathSync(process.argv[1]) === thisFile) {
   run().catch((err) => {
     console.error("Searcharvester MCP server fatal crash:", err);
     process.exit(1);
