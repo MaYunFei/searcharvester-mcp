@@ -275,22 +275,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const data = await fetchWithFallback("/extract", payload);
 
-      let fullContent = data.content || "";
+      // API returns {results: [{url, title, content, ...}], failed_results: []}
+      const result = data.results?.[0] || {};
 
-      // Cascade fetch remaining pages when size matches 'f' (full) and page limit permits
-      if (args.size === "f" && data.pages && data.pages.total > 1) {
+      let fullContent = result.content || "";
+
+      if (args.size === "f" && result.pages && result.pages.total > 1) {
         const activeBaseUrl =
-          internalUrl && data.url.startsWith(internalUrl)
+          internalUrl && result.url && result.url.startsWith(internalUrl)
             ? internalUrl
             : externalUrl;
 
         if (activeBaseUrl) {
-          const total = data.pages.total;
+          const total = result.pages.total;
           for (let p = 2; p <= total; p++) {
             const pageTxt = await fetchExtractPage(
               activeBaseUrl,
               apiKey,
-              data.id,
+              result.id,
               p
             );
             if (pageTxt) {
@@ -301,8 +303,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       const formattedOutput =
-        `URL: ${data.url}\n` +
-        `标题: ${data.title || "未知"}\n` +
+        `URL: ${result.url}\n` +
+        `标题: ${result.title || "未知"}\n` +
         `字符总计: ${fullContent.length} |\n\n` +
         `---\n\n` +
         `${fullContent}`;
