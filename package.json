@@ -1,0 +1,16 @@
+{
+  "name": "searcharvester-mcp",
+  "version": "1.0.0",
+  "description": "MCP server wrapper for Searcharvester with auto rollback logic",
+  "type": "module",
+  "bin": {
+    "searcharvester-mcp": "./index.js"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
